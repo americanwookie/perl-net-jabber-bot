@@ -70,6 +70,25 @@ has 'max_messages_per_hour'   => (isa => PosInt,     is => 'rw', default => 1000
 # Initialize this hour's message count.
 has 'messages_sent_today'     => (isa => 'HashRef', is => 'ro', default => sub{{(localtime)[7] => {(localtime)[2] => 0}}});
 
+#Add missing muc#owner namespace
+{
+    Net::XMPP::Namespaces::add_ns(
+        ns    => 'http://jabber.org/protocol/muc#owner',
+        tag   => 'query',
+        xpath => {
+            X     => {
+                type  => 'child',
+                path  => 'x',
+                child => { ns => 'jabber:x:data' },
+                calls => [ 'Get', 'Defined', 'Add', 'Remove' ],
+            },
+            Owner => { type => 'master' },
+        },
+        docs  => {
+            module => 'Net::Jabber',
+        },
+    );
+}
 
 #my %message_function : ATTR; # What is called if we are fed a new message once we are logged in.
 #my %bot_background_function : ATTR; # What is called if we are fed a new message once we are logged in.
@@ -442,7 +461,7 @@ sub JoinForum {
 
     DEBUG("Joining $forum_name on " . $self->conference_server . " as " . $self->alias);
 
-    $self->jabber_client->MUCJoin(room    => $forum_name,
+    $self->jabber_client->MUCJoin(room   => $forum_name,
                                   server => $self->conference_server,
                                   nick   => $self->alias,
                                   );
@@ -450,6 +469,26 @@ sub JoinForum {
     $self->forum_join_time->{$forum_name} = time;
     DEBUG("Sleeping " . $self->message_delay . " seconds");
     Time::HiRes::sleep $self->message_delay;
+
+    #See if we created the room. If we did, accept the defaults
+    $self->Process(5);
+    my $room_presence = $self->jabber_client->PresenceDBQuery( $forum_name . '@' . $self->conference_server );
+    if( !$room_presence ) {
+        DEBUG("Join room failed");
+        return;
+    }
+    if( $room_presence->GetChild('http://jabber.org/protocol/muc#user')->GetStatusCode() eq '201' ) {
+        #Create and send the IQ packet "confirm"ing the default settings for the room (see XEP-0045 10.1.2 Example 145)
+        my $iq = Net::Jabber::IQ->new();
+        $iq->SetTo( $forum_name . '@' . $self->conference_server );
+        $iq->SetFrom( $self->from_full );
+        $iq->SetType('set');
+        $iq->SetID('create1');
+        my $query = $iq->NewQuery('http://jabber.org/protocol/muc#owner');
+        my $x = $query->NewChild('jabber:x:data');
+        $x->SetType('submit');
+        $self->jabber_client->Send( $iq );
+    }
 }
 
 =item B<Process>
@@ -622,7 +661,7 @@ sub _process_jabber_message {
         my $cond1 = $self->connect_time . " > $time_now - $grace_period";
         my $cond2 = $self->forum_join_time->{$from} || 'undef'
                     . " > $time_now - $grace_period";
-        DEBUG("Ignoring messages cause I'm in startup for forum $from\n$cond1\n$cond2");
+        DEBUG("Ignoring message " . $message->GetXML . " cause I'm in startup for forum $from\n$cond1\n$cond2");
         return; # Ignore messages the first few seconds.
     }
 
@@ -723,6 +762,11 @@ sub _jabber_in_iq_message {
     my $from = $iq->GetFrom();
 #    my $type = $iq->GetType();DEBUG("Type=$type");
     my $query = $iq->GetQuery();#DEBUG("query=" . Dumper($query));
+    if( !$query ) {
+        #One example of an IQ without a query is Example 150 from XEP-0045: "Service Informs New Room Owner of Success"
+        DEBUG("I don't know how to handle IQ messages without a query (" . $iq->GetXML() .")");
+        return;
+    }
     my $xmlns = $query->GetXMLNS();DEBUG("xmlns=$xmlns");
     my $iqReply;
 
