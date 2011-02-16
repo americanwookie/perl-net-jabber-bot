@@ -491,6 +491,35 @@ sub JoinForum {
     }
 }
 
+=item B<SendInvite>
+
+Invites a JID to a Jabber forum. Uses a mediated invitation (Section 7.5.2 from XEP-045)
+Arguemnts: 1. JID of person being invited (in either user@server or user@server/extended); and, 2. Forum name (without server name)
+
+=cut
+
+sub SendInvite {
+    my $self = shift;
+    my $invite_jid = shift;
+    my $forum_name = shift;
+
+    #Let's make sure the forum exists and we're inside of it
+    my $room_presence = $self->jabber_client->PresenceDBQuery( $forum_name . '@' . $self->conference_server );
+    if( !$room_presence ) {
+        DEBUG("Forum $forum_name@" . $self->conference_server . " doesn't exist or you're not a member.");
+        return 0;
+    }
+
+    DEBUG("Inviting $invite_jid to forum $forum_name@ " . $self->conference_server);
+    my $message = Net::Jabber::Message->new();
+    $message->SetTo( $forum_name . '@' . $self->conference_server );
+    $message->SetFrom($self->from_full);
+    my $x = $message->NewChild('http://jabber.org/protocol/muc#user');
+    $x->AddInvite();
+    $x->GetInvite()->SetTo($invite_jid);
+    $self->jabber_client->Send($message);
+}
+
 =item B<Process>
 
 Mostly calls it's client connection's "Process" call.
@@ -663,6 +692,13 @@ sub _process_jabber_message {
                     . " > $time_now - $grace_period";
         DEBUG("Ignoring message " . $message->GetXML . " cause I'm in startup for forum $from\n$cond1\n$cond2");
         return; # Ignore messages the first few seconds.
+    }
+    
+    #Catch MUC errors
+    if($type eq 'error'
+       && $message->GetChild('http://jabber.org/protocol/muc#user')) {
+        DEBUG("Received MUC error from $from_full: '" . $message->GetError() . "' (" . $message->GetErrorCode() . ")");
+        return;
     }
 
     # Ignore Group messages with no resource on them. (Server Messages?)
