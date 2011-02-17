@@ -70,6 +70,9 @@ has 'max_messages_per_hour'   => (isa => PosInt,     is => 'rw', default => 1000
 # Initialize this hour's message count.
 has 'messages_sent_today'     => (isa => 'HashRef', is => 'ro', default => sub{{(localtime)[7] => {(localtime)[2] => 0}}});
 
+# Store presence information about a forum
+has 'forum_participants'      => (isa => HashRef[ArrayRef[HashRef[Str]]], is => 'rw', default => sub{{}});
+
 #Add missing muc#owner namespace
 {
     Net::XMPP::Namespaces::add_ns(
@@ -104,6 +107,7 @@ has 'messages_sent_today'     => (isa => 'HashRef', is => 'ro', default => sub{{
 #my %messages_sent_today: ATTR;   # Tracks messages sent in 2 dimentional hash by day/hour
 #my %max_messages_per_hour: ATTR; # Limits the number of messages per hour.
 #my %safety_mode: ATTR; # Tracks if we are in safety mode.
+#my %forum_participants: ATTR; #Tracks participants in a room
 
 =head1 NAME
 
@@ -520,6 +524,32 @@ sub SendInvite {
     $self->jabber_client->Send($message);
 }
 
+=item B<GetForumUsers>
+
+Returns an dereferenced array of hashes of participants in a forum
+Arguments: 1. forum name
+
+=cut
+
+sub GetForumUsers {
+    my $self = shift;
+    my $forum_name = shift || '';
+    $forum_name  .= '@' . $self->conference_server;
+    my @ret = ();
+
+    if( !$forum_name || !$self->forum_participants->{$forum_name} ) {
+        DEBUG("Forum $forum_name@" . $self->conference_server . " doesn't exist or you're not a member.");
+        return @ret;
+    }
+    foreach my $nick ( keys( %{ $self->forum_participants->{$forum_name} } ) ) {
+        push( @ret, { 'full_nick' => $nick,
+                      'full_jid'  => $self->forum_participants->{$forum_name}->{$nick} } );
+    }
+
+    return \@ret;
+}
+        
+    
 =item B<Process>
 
 Mostly calls it's client connection's "Process" call.
@@ -860,6 +890,25 @@ sub _jabber_presence_message {
     }
 
     $self->jabber_client->PresenceDBParse($presence); # Since we are always an object just throw it into the db.
+
+    #Doesn't look like the PresenceDB keeps track of forums. We'll need to handle that.
+    if( my $user = $presence->GetChild('http://jabber.org/protocol/muc#user') ) {
+        my $forum = $presence->GetFrom();
+        $forum =~ s/\/[^\/]+$//;
+        my $type = $presence->GetType() || "available";
+        my $fullnick = $presence->GetFrom();
+
+        if( $type eq 'available' ) { 
+            DEBUG( "Adding " . $user->GetItem()->GetJID . " to forum list as " . $fullnick . " for forum " . $forum );
+            $self->forum_participants->{$forum}->{$fullnick} = $user->GetItem()->GetJID();
+        } else {
+            DEBUG( "Removing " . $user->GetItem()->GetJID . " from forum list as " . $fullnick . " for forum " . $forum );
+            #you can recognize a nickname change by checking for StatusCode 303 (See 7.3 in XEP-0045).
+            #There's no current need for this, but if we start pusing up more prepared information to the calling program,
+            #we'll need to know this.
+            delete $self->forum_participants->{$forum}->{$fullnick};
+        }
+    }
 
     my $from = $presence->GetFrom();
     $from = "." if(!defined $from);
