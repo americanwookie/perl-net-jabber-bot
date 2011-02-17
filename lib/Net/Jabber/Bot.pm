@@ -540,7 +540,7 @@ sub GetForumUsers {
 
     if( !$forum_name || !$self->forum_participants->{$forum_name} ) {
         DEBUG("Forum $forum_name@" . $self->conference_server . " doesn't exist or you're not a member.");
-        return @ret;
+        return \@ret;
     }
     foreach my $nick ( keys( %{ $self->forum_participants->{$forum_name} } ) ) {
         push( @ret, { 'full_nick' => $nick,
