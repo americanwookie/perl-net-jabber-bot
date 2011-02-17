@@ -506,17 +506,18 @@ sub SendInvite {
     my $self = shift;
     my $invite_jid = shift;
     my $forum_name = shift;
+    $forum_name .= '@' . $self->conference_server;
 
     #Let's make sure the forum exists and we're inside of it
-    my $room_presence = $self->jabber_client->PresenceDBQuery( $forum_name . '@' . $self->conference_server );
+    my $room_presence = $self->jabber_client->PresenceDBQuery( $forum_name );
     if( !$room_presence ) {
-        DEBUG("Forum $forum_name@" . $self->conference_server . " doesn't exist or you're not a member.");
+        DEBUG("Forum $forum_name doesn't exist or you're not a member.");
         return 0;
     }
 
-    DEBUG("Inviting $invite_jid to forum $forum_name@ " . $self->conference_server);
+    DEBUG("Inviting $invite_jid to forum $forum_name");
     my $message = Net::Jabber::Message->new();
-    $message->SetTo( $forum_name . '@' . $self->conference_server );
+    $message->SetTo( $forum_name );
     $message->SetFrom($self->from_full);
     my $x = $message->NewChild('http://jabber.org/protocol/muc#user');
     $x->AddInvite();
