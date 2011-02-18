@@ -924,7 +924,7 @@ sub _jabber_presence_message {
           #There doesn't seem like a straightforward way to tell the difference between a 
           #join/nick change/availability change, so we'll choose an ambiguous type name
           $self->presence_function->( bot_object  => $self,
-                                      forum       => $from_jid->GetJID('base'),
+                                      forum       => $from_jid->GetUserID,
                                       type        => 'update',
                                       nick        => $from_jid->GetResource(),
                                       from_full   => $user->GetItem()->GetJID(),
@@ -942,7 +942,7 @@ sub _jabber_presence_message {
                                                     resource => $user->GetItem()->GetNick()
                                                   );
             $self->presence_function->( bot_object  => $self,
-                                        forum       => $from_jid->GetJID("base"),
+                                        forum       => $from_jid->GetUserID,
                                         type        => "nickchange",
                                         from_full   => $user->GetItem()->GetJID(),
                                         old_nick    => $old_nick_jid->GetUserID(),
@@ -952,7 +952,7 @@ sub _jabber_presence_message {
                                       );
           } elsif( $user->GetRole eq 'none' ) { #Part
             $self->presence_function->( bot_object => $self,
-                                        forum      => $from_jid->GetJID('base'),
+                                        forum      => $from_jid->GetUserID,
                                         type       => 'part',
                                         nick       => $from_jid->GetResource()
                                       );
