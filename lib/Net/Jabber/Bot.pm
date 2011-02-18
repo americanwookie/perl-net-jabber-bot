@@ -46,6 +46,7 @@ has 'resource'            => (isa => Str, lazy => 1, is => 'rw', default => sub{
 #has 'resource'            => (isa => Str, lazy => 1, is => 'rw', default => sub{shift->alias});
 has 'message_function'    => (isa => Maybe[CodeRef], is => 'rw', default => sub{undef});
 has 'background_function' => (isa => Maybe[CodeRef], is => 'rw', default => sub{undef});
+has 'presence_function'   => (isa => Maybe[CodeRef], is => 'rw', default => sub{undef});
 has 'loop_sleep_time'     => (isa => PosNum, is => 'rw', default => 5);
 has 'process_timeout'     => (isa => PosNum, is => 'rw', default => 5);
 has 'from_full'           => (isa => Str, is => 'rw', default => sub{my $self = shift;
@@ -192,6 +193,7 @@ All options:
                                 , alias => 'cpan_bot'
                                 , message_function => \&new_bot_message
                                 , background_function => \&background_checks
+                                , presence_function => \&incoming_presence
                                 , loop_sleep_time => 15
                                 , process_timeout => 5
                                 , forums_and_responses => \%forum_list
@@ -274,6 +276,10 @@ The subroutine the bot will call when a new message is recieved by the bot. Only
 =item B<background_function>
 
 The subroutine the bot will call when every so often (loop_sleep_time) to allow you to do background activities outside jabber stuff (check logs, web pages, etc.)
+
+=item B<presence_function>
+
+The subroutine the bot will call when a new presence is received by the bot. Useful for keeping track of when a JID changes its status, or if someone joins or leaves a forum
 
 =item B<loop_sleep_time>
 
@@ -909,6 +915,67 @@ sub _jabber_presence_message {
             #we'll need to know this.
             delete $self->forum_participants->{$forum}->{$fullnick};
         }
+    }
+
+    # Call the presence callback if it's defined.
+    if( defined $self->presence_function ) {
+      if( my $user = $presence->GetChild('http://jabber.org/protocol/muc#user') ) { #First forums
+        DEBUG("Status Code is ".$user->GetStatusCode());
+        my $from_jid = Net::XMPP::JID->new( $presence->GetFrom() );
+
+        if( $type eq "" ) { #Join, Nick Change, Status Change
+          #There doesn't seem like a straightforward way to tell the difference between a 
+          #join/nick change/availability change, so we'll choose an ambiguous type name
+          $self->presence_function->( bot_object  => $self,
+                                      forum       => $from_jid->GetJID('base'),
+                                      type        => 'update',
+                                      nick        => $from_jid->GetResource(),
+                                      from_full   => $user->GetItem()->GetJID(),
+                                      affiliation => $user->GetItem()->GetAffiliation(),
+                                      role        => $user->GetItem()->GetRole(),
+                                      show        => $presence->GetShow() || 'available',
+                                      status      => $presence->GetStatus()
+                                    );
+        } elsif( $type eq 'unavailable' ) { #Part,Nick Change
+          #So how does GetStatusCode handle multuple status codes, I wasn't able to recreate multiple status codes
+          if( $user->GetStatusCode eq '303' ) { #Nick change
+            my $old_nick_jid = Net::XMPP::JID->new( $presence->GetFrom() );
+            my $new_nick_jid = Net::XMPP::JID->new( userid   => $old_nick_jid->GetUserID(),
+                                                    server   => $old_nick_jid->GetServer(),
+                                                    resource => $user->GetItem()->GetNick()
+                                                  );
+            $self->presence_function->( bot_object  => $self,
+                                        forum       => $from_jid->GetJID("base"),
+                                        type        => "nickchange",
+                                        from_full   => $user->GetItem()->GetJID(),
+                                        old_nick    => $old_nick_jid->GetUserID(),
+                                        new_nick    => $new_nick_jid->GetUserID(),
+                                        affiliation => $user->GetItem()->GetAffiliation(),
+                                        role        => $user->GetItem()->GetRole()
+                                      );
+          } elsif( $user->GetRole eq 'none' ) { #Part
+            $self->presence_function->( bot_object => $self,
+                                        forum      => $from_jid->GetJID('base'),
+                                        type       => 'part',
+                                        nick       => $from_jid->GetResource()
+                                      );
+          } else {
+            DEBUG("Don't know how to handle forum presence: " . $presence->GetXML() );
+          }
+        }
+      } else {
+        #Assuming that this is always a user
+        #TODO need to parse caps ( http://xmpp.org/protocol/caps/ )
+        $self->presence_function->( bot_object => $self,
+                                    type       => 'update',
+                                    from_full  => $presence->GetFrom(),
+                                    show       => $presence->GetShow() || 'available',
+                                    status     => $presence->GetStatus()
+                                  );
+        #Other cases?
+      }
+    } else {
+        WARN("No handler for presences !");
     }
 
     my $from = $presence->GetFrom();
