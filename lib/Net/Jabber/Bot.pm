@@ -484,7 +484,7 @@ sub JoinForum {
     $self->Process(5);
     my $room_presence = $self->jabber_client->PresenceDBQuery( $forum_name . '@' . $self->conference_server );
     if( !$room_presence ) {
-        DEBUG("Join room failed");
+        WARN("Join room failed");
         return;
     }
     if( $room_presence->GetChild('http://jabber.org/protocol/muc#user')->GetStatusCode() eq '201' ) {
@@ -517,11 +517,11 @@ sub SendInvite {
     #Let's make sure the forum exists and we're inside of it
     my $room_presence = $self->jabber_client->PresenceDBQuery( $forum_name );
     if( !$room_presence ) {
-        DEBUG("Forum $forum_name doesn't exist or you're not a member.");
+        WARN("Forum $forum_name doesn't exist or you're not a member.");
         return 0;
     }
 
-    DEBUG("Inviting $invite_jid to forum $forum_name");
+    INFO("Inviting $invite_jid to forum $forum_name");
     my $message = Net::Jabber::Message->new();
     $message->SetTo( $forum_name );
     $message->SetFrom($self->from_full);
@@ -545,12 +545,12 @@ sub GetForumUsers {
     my @ret = ();
 
     if( !$forum_name || !$self->forum_participants->{$forum_name} ) {
-        DEBUG("Forum $forum_name@" . $self->conference_server . " doesn't exist or you're not a member.");
+        WARN("Forum $forum_name@" . $self->conference_server . " doesn't exist or you're not a member.");
         return \@ret;
     }
     foreach my $nick ( keys( %{ $self->forum_participants->{$forum_name} } ) ) {
-        push( @ret, { 'full_nick' => $nick,
-                      'full_jid'  => $self->forum_participants->{$forum_name}->{$nick} } );
+        push( @ret, { 'nick'     => $nick,
+                      'from_full' => $self->forum_participants->{$forum_name}->{$nick} } );
     }
 
     return \@ret;
@@ -900,27 +900,24 @@ sub _jabber_presence_message {
 
     #Doesn't look like the PresenceDB keeps track of forums. We'll need to handle that.
     if( my $user = $presence->GetChild('http://jabber.org/protocol/muc#user') ) {
-        my $forum = $presence->GetFrom();
-        $forum =~ s/\/[^\/]+$//;
-        my $type = $presence->GetType() || "available";
-        my $fullnick = $presence->GetFrom();
+        my $from_jid = Net::XMPP::JID->new( $presence->GetFrom() );
 
-        if( $type eq 'available' ) { 
-            DEBUG( "Adding " . $user->GetItem()->GetJID . " to forum list as " . $fullnick . " for forum " . $forum );
-            $self->forum_participants->{$forum}->{$fullnick} = $user->GetItem()->GetJID();
+        if(   !$type 
+           || $type eq 'available' ) { 
+            INFO( "Adding " . $user->GetItem()->GetJID . " to forum list as " . $from_jid->GetResource() . " for forum " . $from_jid->GetJID('base') );
+            $self->forum_participants->{$from_jid->GetJID('base')}->{$from_jid->GetResource()} = $user->GetItem()->GetJID();
         } else {
-            DEBUG( "Removing " . $user->GetItem()->GetJID . " from forum list as " . $fullnick . " for forum " . $forum );
+            INFO( "Removing " . $user->GetItem()->GetJID . " from forum list as " . $from_jid->GetResource() . " for forum " . $from_jid->GetJID('base') );
             #you can recognize a nickname change by checking for StatusCode 303 (See 7.3 in XEP-0045).
             #There's no current need for this, but if we start pusing up more prepared information to the calling program,
             #we'll need to know this.
-            delete $self->forum_participants->{$forum}->{$fullnick};
+            delete $self->forum_participants->{$from_jid->GetJID('base')}->{$from_jid->GetResource()};
         }
     }
 
     # Call the presence callback if it's defined.
     if( defined $self->presence_function ) {
       if( my $user = $presence->GetChild('http://jabber.org/protocol/muc#user') ) { #First forums
-        DEBUG("Status Code is ".$user->GetStatusCode());
         my $from_jid = Net::XMPP::JID->new( $presence->GetFrom() );
 
         if( $type eq "" ) { #Join, Nick Change, Status Change
