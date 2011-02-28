@@ -755,6 +755,11 @@ sub _process_jabber_message {
             DEBUG("Ignoring message from self...\n");
             return;
         }
+        if(   $type eq 'groupchat'
+           && $resource eq $self->alias ) {
+            DEBUG("Ignoring mesage from self...\n");
+            return;
+        }
     }
 
     # Determine if this message was addressed to me. (groupchat only)
